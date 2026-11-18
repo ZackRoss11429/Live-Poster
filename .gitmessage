@@ -1,0 +1,8 @@
+# <type>: <short summary, imperative, under 72 chars>
+#
+# Types: feat, fix, docs, test, refactor, chore, style
+# Example: feat: render date mini-app in six-colour palette
+#
+# Why this change (optional):
+#
+# Refs: #<issue>
