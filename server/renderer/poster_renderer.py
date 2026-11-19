@@ -3,8 +3,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 import numpy as np
-from PIL import Image, ImageDraw, ImageOps, ImageFilter
-from epaper_dithering import DbsParams, DitherMode, DitherOptions, Palette, dither_image
+from PIL import Image, ImageDraw, ImageFilter, ImageFont, ImageOps
+from epaper_dithering import DitherMode, DitherOptions, Palette, dither_image
 from constants import WIDTH, HEIGHT
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -33,8 +33,21 @@ def _extract_palette_inks(pal: Palette) -> frozenset[tuple[int, int, int]]:
 
 ALLOWED_SIX_INKS: frozenset[tuple[int, int, int]] = _extract_palette_inks(palette)
 
+# Nominal inks: use these on the canvas *before* dithering.
 INK_WHITE = (255, 255, 255)
 INK_BLACK = (0, 0, 0)
+
+
+def _panel_rgb(nominal: tuple[int, int, int]) -> tuple[int, int, int]:
+    probe = Image.new("RGB", (1, 1), nominal)
+    return dither_image(probe, palette, DitherOptions(mode=DitherMode.NONE)).convert("RGB").getpixel((0, 0))
+
+
+# Measured inks: use these when drawing on the image *after* dithering.
+PANEL_WHITE = _panel_rgb(INK_WHITE)
+PANEL_BLACK = _panel_rgb(INK_BLACK)
+
+TIMESTAMP_FONT = ImageFont.load_default(size=28)
 
 
 @dataclass(frozen=True)
@@ -66,24 +79,32 @@ def render_image_poster(
             color=INK_WHITE,
         )
 
-    canvas = canvas.filter(ImageFilter.UnsharpMask(radius=1.2, percent=80, threshold=3))
+    # Smooth, don't sharpen: dithering adds its own texture, and sharpening turns source grain into speckle.
+    canvas = canvas.filter(ImageFilter.GaussianBlur(radius=0.8))
 
-    # --- STEP 3: Optionally add a timestamp ---
-    if settings.show_timestamp:
-        draw = ImageDraw.Draw(canvas)
-        box_y0 = height - 45
-        box_y1 = height - 15
-        draw.rectangle([16, box_y0, 260, box_y1], fill=INK_WHITE)
-        timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S UTC")
-        draw.text((24, box_y0 + 8), timestamp_str, fill=INK_BLACK)
-
-    # --- STEP 4: Reduce to the 6 panel inks ---
+    # --- STEP 3: Reduce to the 6 panel inks ---
     options = DitherOptions(
-        mode=DitherMode.FLOYD_STEINBERG,
+        # Atkinson: no lattice pattern on flat areas (Floyd-Steinberg makes a visible grid on skies).
+        mode=DitherMode.ATKINSON,
         serpentine=True,
-        saturation=1.05,
+        # The measured palette is dark and narrow; squeeze the source into it before matching.
+        tone=0.5,
+        gamut=0.5,
+        shadows=0.3,
         dbs=settings.use_dbs,
     )
-    dithered = dither_image(canvas, palette)
+    dithered = dither_image(canvas, palette, options).convert("RGB")
 
-    return dithered.convert("RGB")
+    # --- STEP 4: Optionally add a timestamp (after dithering, so text stays crisp and exact-ink) ---
+    if settings.show_timestamp:
+        draw = ImageDraw.Draw(dithered)
+        draw.fontmode = "1"  # no anti-aliasing: every pixel stays one of the six inks
+        timestamp_str = now.strftime("%Y-%m-%d %H:%M UTC")
+        left, top, right, bottom = draw.textbbox((0, 0), timestamp_str, font=TIMESTAMP_FONT)
+        pad = 10
+        x0, y1 = 16, height - 16
+        y0 = y1 - (bottom - top) - 2 * pad
+        draw.rectangle([x0, y0, x0 + (right - left) + 2 * pad, y1], fill=PANEL_WHITE)
+        draw.text((x0 + pad - left, y0 + pad - top), timestamp_str, fill=PANEL_BLACK, font=TIMESTAMP_FONT)
+
+    return dithered

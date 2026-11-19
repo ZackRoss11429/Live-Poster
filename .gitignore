@@ -34,6 +34,7 @@ volume/
 # Rendered output (fixtures in server/tests/fixtures are kept)
 out/
 renders/
+server/renderer/test_images/output_*.png
 
 # Editors and OS
 .vscode/

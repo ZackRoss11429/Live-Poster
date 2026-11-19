@@ -37,6 +37,7 @@ def test_imported_image_outputs_only_six_panel_inks() -> None:
 
     unexpected = unique_rgb - ALLOWED_SIX_INKS
     assert not unexpected, f"Unexpected RGB values found: {unexpected}"
+    # Only valid for this gradient fixture, which spans every ink; real images may use fewer.
     assert len(unique_rgb) == 6, f"Expected 6 unique RGB values, found {len(unique_rgb)}: {unique_rgb}"
 
 
@@ -51,4 +52,7 @@ if __name__ == "__main__":
             datetime.now(timezone.utc),
         )
         out.save(IMG_DIR / "output_image_1600x1200.png", format="PNG")
-        out.show()
+        # Averaged downscale ~ how the panel reads from across a room; judge quality on this, not 100% zoom.
+        preview = out.resize((WIDTH // 2, HEIGHT // 2), Image.Resampling.BOX)
+        preview.save(IMG_DIR / "output_preview_800x600.png", format="PNG")
+        preview.show()
